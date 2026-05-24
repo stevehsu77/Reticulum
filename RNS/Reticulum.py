@@ -28,6 +28,10 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
+import sys
+import os
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+
 from .vendor.platformutils import get_platform
 
 if get_platform() == "android":
@@ -142,6 +146,12 @@ class Reticulum:
 
     # Length of truncated hashes in bits.
     TRUNCATED_HASHLENGTH = 128
+
+    # Length of zone IDs in bits is 48, which is 6 hexadecimal characters, or 3 bytes.
+    ZONE_IDLENGTH = (TRUNCATED_HASHLENGTH//16)*6
+
+    # Length of magic code in bits is 16, which is 2 hexadecimal characters, or 1 byte.
+    MAGIC_CODELENGTH = (TRUNCATED_HASHLENGTH//16)*2
 
     HEADER_MINSIZE   = 2+1+(TRUNCATED_HASHLENGTH//8)*1
     HEADER_MAXSIZE   = 2+1+(TRUNCATED_HASHLENGTH//8)*2
@@ -276,6 +286,19 @@ class Reticulum:
         Reticulum.__ic_held_release_interval          = None
         Reticulum.__ec_pr_freq                        = None
         Reticulum.__egress_control                    = None
+
+        # Zone exploration settings
+        Reticulum.__zone_enabled                      = False
+        Reticulum.__zone_id                           = []
+
+        # Magic code is used to identify the type of packet being processed,
+        # and to determine how to process it. 
+        Reticulum.__magic00                           = [0xff, 0x11]
+        Reticulum.__magic01                           = [0x22, 0xee]
+        Reticulum.__magic10                           = [0xdd, 0x33]
+        Reticulum.__magic11                           = [0x44, 0xbb]
+
+        Reticulum.__zones_rule                        = {}
 
         Reticulum.panic_on_interface_error = False
 
@@ -427,6 +450,7 @@ class Reticulum:
                     self.is_standalone_instance = False
                     self.is_connected_to_shared_instance = True
                     Reticulum.__transport_enabled = False
+                    Reticulum.__zone_enabled = False
                     Reticulum.__remote_management_enabled = False
                     Reticulum.__allow_probes = False
                     RNS.log("Connected to locally available Reticulum instance via: "+str(interface), RNS.LOG_DEBUG)
@@ -498,6 +522,10 @@ class Reticulum:
                     v = self.config["reticulum"].as_bool(option)
                     if v == True: Reticulum.__transport_enabled = True
                 
+                if option == "enable_zone":
+                    v = self.config["reticulum"].as_bool(option)
+                    if v == True: Reticulum.__zone_enabled = True
+
                 if option == "network_identity":
                     if Reticulum.__network_identity == None:
                         path = self.config["reticulum"][option]
@@ -651,6 +679,45 @@ class Reticulum:
                     v = self.config["reticulum"].as_float(option)
                     if v >= 0: Reticulum.__ic_held_release_interval = v
 
+                dest_len = (RNS.Reticulum.ZONE_IDLENGTH//8)*2
+                if option == "zone_id":
+                    hexhash = self.config["reticulum"][option]
+                    if len(hexhash) != dest_len: 
+                        raise ValueError(f"Zone ID length for id source {hexhash} is invalid, must be {dest_len} hexadecimal characters ({dest_len//2} bytes).")
+                    try: source_identity_hash = bytes.fromhex(hexhash)
+                    except Exception as e: raise ValueError(f"Invalid zone ID for remote id source: {hexhash}")
+                    if not source_identity_hash in Reticulum.__zone_id: Reticulum.__zone_id = source_identity_hash
+
+                dest_len = (RNS.Reticulum.MAGIC_CODELENGTH//8)*2
+                if option == "magic_00":
+                    hexhash = self.config["reticulum"][option]
+                    if len(hexhash) != dest_len:
+                        raise ValueError(f"Magic code length for code source {hexhash} is invalid, must be {dest_len} hexadecimal characters ({dest_len//2} bytes).")
+                    try: source_identity_hash = bytes.fromhex(hexhash)
+                    except Exception as e: raise ValueError(f"Invalid magic code for remote code source: {hexhash}")
+                    if not source_identity_hash in Reticulum.__magic00: Reticulum.__magic00 = source_identity_hash
+                if option == "magic_01":
+                    hexhash = self.config["reticulum"][option]
+                    if len(hexhash) != dest_len:
+                        raise ValueError(f"Magic code length for code source {hexhash} is invalid, must be {dest_len} hexadecimal characters ({dest_len//2} bytes).")
+                    try: source_identity_hash = bytes.fromhex(hexhash)
+                    except Exception as e: raise ValueError(f"Invalid magic code for remote code source: {hexhash}")
+                    if not source_identity_hash in Reticulum.__magic01: Reticulum.__magic01 = source_identity_hash
+                if option == "magic_10":
+                    hexhash = self.config["reticulum"][option]
+                    if len(hexhash) != dest_len:
+                        raise ValueError(f"Magic code length for code source {hexhash} is invalid, must be {dest_len} hexadecimal characters ({dest_len//2} bytes).")
+                    try: source_identity_hash = bytes.fromhex(hexhash)
+                    except Exception as e: raise ValueError(f"Invalid magic code for remote code source: {hexhash}")
+                    if not source_identity_hash in Reticulum.__magic10: Reticulum.__magic10 = source_identity_hash
+                if option == "magic_11":
+                    hexhash = self.config["reticulum"][option]
+                    if len(hexhash) != dest_len:
+                        raise ValueError(f"Magic code length for code source {hexhash} is invalid, must be {dest_len} hexadecimal characters ({dest_len//2} bytes).")
+                    try: source_identity_hash = bytes.fromhex(hexhash)
+                    except Exception as e: raise ValueError(f"Invalid magic code for remote code source: {hexhash}")
+                    if not source_identity_hash in Reticulum.__magic11: Reticulum.__magic11 = source_identity_hash
+
 
         if RNS.compiled: RNS.log("Reticulum running in compiled mode", RNS.LOG_DEBUG)
         else: RNS.log("Reticulum running in interpreted mode", RNS.LOG_DEBUG)
@@ -674,8 +741,19 @@ class Reticulum:
                 for name in self.config["interfaces"]:
                     if not name in interface_names:
                         c = self.config["interfaces"][name]
+                        dest_len = (RNS.Reticulum.ZONE_IDLENGTH//8)*2
+                        ifzonerules = {}
+                        Reticulum.__zones_rule[name] = ifzonerules
+                        if "zone_rules" in c:
+                            zones = c["zone_rules"]
+                            for zoneid in zones:
+                                if len(zoneid) != dest_len:
+                                    raise ValueError(f"Zone ID length for zone {zoneid} is invalid, must be {dest_len} hexadecimal characters ({dest_len//2} bytes).")
+                                try: source_identity_hash = bytes.fromhex(zoneid)
+                                except Exception as e: raise ValueError(f"Invalid zone id for remote code source: {zoneid}")
+                                ifzonerules[zoneid] = zones[zoneid]
+                                ifzonerules[zoneid]["zoneid"] = source_identity_hash
                         self._synthesize_interface(c, name, instance_init=True)
-
                     else:
                         RNS.log("The interface name \""+name+"\" was already used. Check your configuration file for errors!", RNS.LOG_ERROR)
                         RNS.panic()
@@ -925,6 +1003,8 @@ class Reticulum:
                 interface_config["selected_interface_mode"] = interface_mode
                 interface_config["configured_bitrate"] = configured_bitrate
 
+                interface_config["zone_rules"] = self.get_zone_rules(name)
+       
                 if c["type"] == "AutoInterface":
                     interface = AutoInterface.AutoInterface(RNS.Transport, interface_config)
                     interface_post_init(interface)
@@ -1806,6 +1886,157 @@ class Reticulum:
     def max_autoconnected_interfaces():
         return Reticulum.__autoconnect_discovered_interfaces
 
+
+    @staticmethod
+    def encode_zone_hash(hash):
+        """
+        Returns the Zone hash for a given hash.
+
+        :param hash: The hash to get the Zone hash for.
+        :returns: The Zone hash as bytes, or None if not found.
+        """   
+
+        zoneid = Reticulum.__zone_id
+        magicbith = zoneid[Reticulum.ZONE_IDLENGTH//8-1] & 0b10000000
+        magicbitl = zoneid[0] & 0b00000001
+        magichash = None
+        if magicbith == 0b000000000 and magicbitl == 0b00000000:
+            magichash = bytearray(Reticulum.__magic00)
+        elif magicbith == 0b100000000 and magicbitl == 0b00000000:
+            magichash = bytearray(Reticulum.__magic10)
+        elif magicbith == 0b00000000 and magicbitl == 0b00000001:
+            magichash = bytearray(Reticulum.__magic01)
+        else:
+            magichash = bytearray(Reticulum.__magic11)
+    
+        for i in range(Reticulum.TRUNCATED_HASHLENGTH//16):
+            if i<len(hash): magichash.append(hash[i])
+            else: magichash.append(0)
+            if i<len(zoneid): magichash.append(zoneid[i])
+
+        magichash[1] = 0b11111110
+        backcode=Reticulum.decode_zone_hash(bytes(magichash))
+        return bytes(magichash)
+
+    @staticmethod
+    def decode_zone_hash(hash):
+        """
+        Returns the original hash for a given Zone hash.
+
+        :param hash: The Zone hash to decode.
+        :returns: The original hash as bytes, or None if not found.
+        """
+        # Implementation for decoding Zone hash
+        if hash!= None and len(hash) == (Reticulum.TRUNCATED_HASHLENGTH//8):
+            magiccode = hash[:2]
+            magichigh = None
+            magiclow = None
+            if magiccode == Reticulum.__magic00:
+                magichigh = 0b00000000
+                magiclow = 0b00000000  
+            elif magiccode == Reticulum.__magic10:
+                magichigh = 0b10000000
+                magiclow = 0b00000000
+            elif magiccode == Reticulum.__magic01:
+                magichigh = 0b00000000
+                magiclow = 0b00000001
+            elif magiccode == Reticulum.__magic11:
+                magichigh = 0b10000000
+                magiclow = 0b00000001
+
+            chkhigh=hash[Reticulum.ZONE_IDLENGTH//8*2+1] & 0b10000000
+            chklow=hash[3] & 0b00000001
+
+            if magichigh != None and magiclow != None:
+                if chkhigh == magichigh and chklow == magiclow:
+                    zoneid = bytearray()
+                    for i in range(Reticulum.ZONE_IDLENGTH//8):
+                        zoneid.append(hash[i*2+3])
+                    return bytes(zoneid)
+            return None 
+        
+    @staticmethod
+    def get_zone_rules(interface):
+        """
+        Returns the Zone rules for a given interface.
+
+        :param interface: The interface to get the Zone rules for.
+        :returns: A list of Zone rules for the given interface.
+        """
+        if type(interface) != str:        
+            if hasattr(interface,"name"): name = interface.name 
+        else :  name = str(interface)
+        if name in Reticulum.__zones_rule:
+            return Reticulum.__zones_rule[name]
+        else:   return None
+    @staticmethod
+
+    def zones_rule():
+        """
+        Returns the Zone rules for all interfaces.
+
+        :returns: A dictionary of interface names and their corresponding Zone rules.
+        """
+        return Reticulum.__zones_rule
+
+    @staticmethod
+    def zone_enabled():
+        """
+        Returns whether Zone exploration is enabled for the running
+        instance.
+
+        When Zone exploration is enabled, Reticulum will
+        explore and connect to other zones in the network.
+
+        :returns: True if Zone exploration is enabled, False if not.
+        """
+        return Reticulum.__zone_enabled
+    
+    @staticmethod
+    def zone_id():
+        """
+        Returns the Zone ID for this instance.
+
+        :returns: The Zone ID as a string.
+        """
+        return Reticulum.__zone_id
+    
+    @staticmethod
+    def magic00():
+        """
+        Returns the magic00 value for this instance.
+
+        :returns: The magic00 value as bytes.
+        """
+        return Reticulum.__magic00
+
+    @staticmethod
+    def magic01():
+        """
+        Returns the magic01 value for this instance.
+
+        :returns: The magic01 value as bytes.
+        """
+        return Reticulum.__magic01
+
+    @staticmethod
+    def magic10():
+        """
+        Returns the magic10 value for this instance.
+
+        :returns: The magic10 value as bytes.
+        """
+        return Reticulum.__magic10
+
+    @staticmethod
+    def magic11():
+        """
+        Returns the magic11 value for this instance.
+
+        :returns: The magic11 value as bytes.
+        """
+        return Reticulum.__magic11
+
 # Default configuration file:
 __default_rns_config__ = '''# This is the default Reticulum config file.
 # You should probably edit it to include any additional,
@@ -1891,6 +2122,15 @@ instance_name = default
 
 # blackhole_sources = 521c87a83afb8f29e4455e77930b973b
 
+# You can configure Zone exploration and connectivity for your instance. 
+# When enabled, transport nodes will forward traffic by interface rules.
+# Zones are a way to segment the network into different areas, 
+# which can be useful for various purposes such as improving routing efficiency or 
+# creating separate communities within the network.
+# maximum zone size is 12hex characters (48 bits), and should be unique to your zone.
+
+# enable_zone = yes
+# zone_id = a1b2c3d4e5f6
 
 [logging]
 # Valid log levels are 0 through 7:

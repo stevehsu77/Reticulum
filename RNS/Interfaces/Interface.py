@@ -130,6 +130,9 @@ class Interface:
         self.egress_control           = RNS.Reticulum.get_instance()._default_egress_control()
         self.held_announces           = {}
 
+        self.zone_dict                = {}
+        self.zone_default_allow       = False 
+
         self.ia_freq_deque = deque(maxlen=Interface.IA_FREQ_SAMPLES)
         self.oa_freq_deque = deque(maxlen=Interface.OA_FREQ_SAMPLES)
         self.ip_freq_deque = deque(maxlen=Interface.IA_FREQ_SAMPLES)
@@ -161,7 +164,6 @@ class Interface:
                     return True
 
                 else: return False
-
         else: return False
 
     def should_ingress_limit_pr(self):

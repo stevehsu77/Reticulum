@@ -6,8 +6,33 @@
   instance_control_port = 55906
   panic_on_interface_error = No
 
+  enable_zone = yes
+  zone_id = ffdcba090887
+
+  magic_00 = 7f7f
+  magic_01 = "8e8e"
+  magic_10 = 6d6d
+  magic_11 = 0c0c
+  
+
 [logging]
   loglevel = 1
 
 [interfaces]
   # No interfaces, only local traffic
+    [[Test IF]]
+        type = AutoInterface
+        enabled = yes
+        zone_default_allow = Yes
+        [[[zone_rules]]]
+          [[[[ff00ff00ff00]]]]
+            accept_in = Yes
+            accept_out = Yes
+            in_hop_cost = yes
+            out_hop_cost = yes
+          [[[[ff00ff00ff11]]]]
+            accept_in = Yes
+            accept_out = Yes
+            in_hop_cost = yes
+            out_hop_cost = yes
+            

@@ -126,8 +126,13 @@ class Destination:
                 addr_hash_material += identity
             else:
                 raise TypeError("Invalid material supplied for destination hash calculation")
-
-        return RNS.Identity.full_hash(addr_hash_material)[:RNS.Reticulum.TRUNCATED_HASHLENGTH//8]
+            
+        addr_hash_material = RNS.Identity.full_hash(addr_hash_material)[:RNS.Reticulum.TRUNCATED_HASHLENGTH//8]
+        if RNS.Reticulum.zone_enabled():
+            if RNS.Reticulum.zone_id() != None:
+                addr_hash_material = RNS.Reticulum.encode_zone_hash(addr_hash_material)
+                
+        return addr_hash_material
 
     @staticmethod
     def app_and_aspects_from_name(full_name):

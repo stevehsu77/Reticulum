@@ -19,8 +19,13 @@ APP_NAME = "example_utilities"
 fruits = ["Peach", "Quince", "Date", "Tangerine", "Pomelo", "Carambola", "Grape"]
 noble_gases = ["Helium", "Neon", "Argon", "Krypton", "Xenon", "Radon", "Oganesson"]
 
+
 # This initialisation is executed when the program is started
 def program_setup(configpath):
+
+    if not configpath:
+        configpath = 'C:\\Users\\steve\\Documents\\projects\\rns-zone\\tests\\rnsconfig'
+
     # We must first initialise Reticulum
     reticulum = RNS.Reticulum(configpath)
     

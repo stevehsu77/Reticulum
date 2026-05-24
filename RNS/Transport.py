@@ -210,7 +210,7 @@ class Transport:
     _should_run                 = True
 
     # 新增這行屬性，作為全域開關的預設值
-    enable_zone_exploration     = False
+    # enable_zone_exploration     = False
 
     @staticmethod
     def start(reticulum_instance):
@@ -419,16 +419,16 @@ class Transport:
                 Transport.synthesize_tunnel(interface)
 
         # --- 新增這段邏輯 ---
-        try:
-            # 從 reticulum.conf 的 [reticulum] 區段讀取 enable_zone_exploration
-            if reticulum_instance.config.has_option("reticulum", "enable_zone_exploration"):
-                Transport.enable_zone_exploration = reticulum_instance.config.getboolean("reticulum", "enable_zone_exploration")
-            else:
-                # 若沒設定，預設為 False
-                Transport.enable_zone_exploration = False
-        except Exception as e:
-            RNS.log(f"Error reading zone exploration config: {e}", RNS.LOG_ERROR)
-            Transport.enable_zone_exploration = False
+        # try:
+        #     # 從 reticulum.conf 的 [reticulum] 區段讀取 enable_zone_exploration
+        #     if reticulum_instance.config.has_option("reticulum", "enable_zone_exploration"):
+        #         Transport.enable_zone_exploration = reticulum_instance.config.getboolean("reticulum", "enable_zone_exploration")
+        #     else:
+        #         # 若沒設定，預設為 False
+        #         Transport.enable_zone_exploration = False
+        # except Exception as e:
+        #     RNS.log(f"Error reading zone exploration config: {e}", RNS.LOG_ERROR)
+        #     Transport.enable_zone_exploration = False
         # --------------------
   
         gc.collect()
@@ -1502,11 +1502,12 @@ class Transport:
         # 該封包的身分與你的網路身分關聯，判定為自己人的封包，將跳數減一，讓它看起來像是直接從來源發出的一樣
         # 這樣做的目的是讓區域探索功能能夠正常運作，因為區域探索需要能夠識別自己人發出的封包，以便在網路中進行適當的處理和路由。
         # 這樣的設計可以讓區域探索功能更有效地運作，因為它能夠正確地識別和處理來自自己人的封包，從而實現更好的網路探索和管理。
-        elif Transport.enable_zone_exploration and Transport.network_identity:
-            identity = RNS.Identity.recall(packet.source_hash)
-            if identity and identity.hash == Transport.network_identity.hash:
-                packet.hops -= 1
-
+        # elif Transport.enable_zone_exploration and Transport.network_identity:
+        #     identity = RNS.Identity.recall(packet.source_hash)
+        #     if identity and identity.hash == Transport.network_identity.hash:
+        #         packet.hops -= 1
+        #         RNS.log(f"Zone exploration: hop count exempted for {RNS.prettyhexrep(packet.source_hash)}", RNS.LOG_DEBUG)
+                
         if Transport.packet_filter(packet):
             # By default, remember packet hashes to avoid routing
             # loops in the network, using the packet filter.
