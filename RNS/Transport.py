@@ -209,9 +209,6 @@ class Transport:
 
     _should_run                 = True
 
-    # 新增這行屬性，作為全域開關的預設值
-    # enable_zone_exploration     = False
-
     @staticmethod
     def start(reticulum_instance):
         Transport.owner = reticulum_instance
@@ -1131,6 +1128,30 @@ class Transport:
             # TODO: Enable when caching has been redesigned
             # Transport.cache(packet)
 
+        # Ready to check zone rules and transmit the packet.                                ->steve
+        # If the packet has an attached interface, 
+        # or belongs to a link, we only transmit on the relevant interface, 
+        # otherwise we broadcast on all outgoing interfaces.
+        #RNS.log("Packet ready to be transmitted to"+RNS.prettyhexrep(packet.destination_hash)+" on "+str(interface), RNS.LOG_DEBUG) 
+        istagged = False
+        isdropped = False
+        def out_zone_rules(interface, packet):
+            nonlocal istagged, isdropped
+            if RNS.Reticulum.zone_enabled():
+                zoneid = RNS.Reticulum.decode_zone_hash(packet.destination_hash)
+                if zoneid != None:
+                    istagged = True
+                    if interface != None:
+                        zone_rules = interface.zone_rules
+                        isdropped = not interface.zone_default_allow
+                        if zone_rules != None:
+                            zoneidstr = zoneid.hex()
+                            if zoneidstr in zone_rules:
+                                rules = zone_rules[zoneidstr] 
+                                isdropped = not rules.as_bool("accept_out") if "accept_out" in rules else isdropped
+                        return not isdropped
+            return True
+
         # Check if we have a known path for the destination in the path table
         if packet.packet_type != RNS.Packet.ANNOUNCE and packet.destination.type != RNS.Destination.PLAIN and packet.destination.type != RNS.Destination.GROUP and packet.destination_hash in Transport.path_table:
             with Transport.path_table_lock:
@@ -1140,6 +1161,9 @@ class Transport:
                 else: path_entry = Transport.path_table[packet.destination_hash]
 
             outbound_interface = path_entry[IDX_PT_RVCD_IF]
+
+            # check zone rules and mark for dropping if needed         ->steve
+            should_transmit = out_zone_rules(outbound_interface, packet)
 
             # If there's more than one hop to the destination, and we know
             # a path, we insert the packet into transport by adding the next
@@ -1195,6 +1219,10 @@ class Transport:
             stored_hash = False
             for interface in Transport.interfaces:
                 if interface.OUT:
+
+                    # check zone rules and mark for dropping if needed         ->steve
+                    should_transmit = out_zone_rules(interface, packet)
+
                     should_transmit = True
 
                     if packet.destination.type == RNS.Destination.LINK:
@@ -1467,6 +1495,32 @@ class Transport:
         packet = RNS.Packet(None, raw)
         if not packet.unpack(): return
 
+        # if zone-enabled, check if the packet belongs to a zone,                               ->steve
+        # and if so, mark it as such. 
+        # This is used for special handling of zone packets in the path table and elsewhere.
+        #RNS.log("Received packet "+RNS.prettyhexrep(packet.destination_hash)+" on "+str(interface), RNS.LOG_DEBUG) 
+        istagged = False
+        iscosted = True
+        isdropped = False
+        def in_zone_rules(interface, packet):
+            nonlocal istagged, isdropped, iscosted
+            if RNS.Reticulum.zone_enabled():
+                zoneid = RNS.Reticulum.decode_zone_hash(packet.destination_hash)
+                if zoneid != None:
+                    istagged = True
+                    if interface != None:
+                        zone_rules = interface.zone_rules
+                        isdropped = not interface.zone_default_allow
+                        if zone_rules != None:
+                            zoneidstr = zoneid.hex()
+                            if zoneidstr in zone_rules:
+                                rules = zone_rules[zoneidstr] 
+                                isdropped = not rules.as_bool("accept_in") if "accept_in" in rules else isdropped
+                                iscosted = rules.as_bool("hop_cost") if "hop_cost" in rules else iscosted
+                        return not isdropped
+            return True
+        should_reveive = in_zone_rules(interface, packet)
+    
         packet.receiving_interface = interface
         packet.hops += 1
 
@@ -1496,17 +1550,6 @@ class Transport:
             if Transport.is_local_client_interface(interface): packet.hops -= 1
 
         elif Transport.interface_to_shared_instance(interface): packet.hops -= 1
-
-
-        # 啟用區域探索功能，將封包的來源與你的網路身分進行比對
-        # 該封包的身分與你的網路身分關聯，判定為自己人的封包，將跳數減一，讓它看起來像是直接從來源發出的一樣
-        # 這樣做的目的是讓區域探索功能能夠正常運作，因為區域探索需要能夠識別自己人發出的封包，以便在網路中進行適當的處理和路由。
-        # 這樣的設計可以讓區域探索功能更有效地運作，因為它能夠正確地識別和處理來自自己人的封包，從而實現更好的網路探索和管理。
-        # elif Transport.enable_zone_exploration and Transport.network_identity:
-        #     identity = RNS.Identity.recall(packet.source_hash)
-        #     if identity and identity.hash == Transport.network_identity.hash:
-        #         packet.hops -= 1
-        #         RNS.log(f"Zone exploration: hop count exempted for {RNS.prettyhexrep(packet.source_hash)}", RNS.LOG_DEBUG)
                 
         if Transport.packet_filter(packet):
             # By default, remember packet hashes to avoid routing

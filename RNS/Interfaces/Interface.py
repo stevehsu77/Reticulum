@@ -130,8 +130,9 @@ class Interface:
         self.egress_control           = RNS.Reticulum.get_instance()._default_egress_control()
         self.held_announces           = {}
 
-        self.zone_dict                = {}
-        self.zone_default_allow       = False 
+        # Zone rules and defaults for this interface. ->steve
+        self.zone_rules               = None
+        self.zone_default_allow       = True 
 
         self.ia_freq_deque = deque(maxlen=Interface.IA_FREQ_SAMPLES)
         self.oa_freq_deque = deque(maxlen=Interface.OA_FREQ_SAMPLES)
@@ -252,6 +253,7 @@ class Interface:
                         self.ic_held_release = time.time() + self.ic_held_release_interval
                         self.held_announces.pop(selected_announce_packet.destination_hash)
                         def release(): RNS.Transport.inbound(selected_announce_packet.raw, selected_announce_packet.receiving_interface)
+                        RNS.log(f"Scheduling release of held announce packet in {selected_announce_packet.destination_hash.hex()} seconds", RNS.LOG_NOTICE)
                         threading.Thread(target=release, daemon=True).start()
         
         except Exception as e:

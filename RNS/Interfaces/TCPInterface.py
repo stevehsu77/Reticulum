@@ -624,6 +624,11 @@ class TCPServerInterface(Interface):
         spawned_interface.announce_rate_penalty = self.announce_rate_penalty
         spawned_interface.mode = self.mode
         spawned_interface.HW_MTU = self.HW_MTU
+
+        # Inherited zone rules and defaults from parent interface ->steve 
+        spawned_interface.zone_default_allow = self.zone_default_allow
+        spawned_interface.zone_rules = self.zone_rules
+
         spawned_interface.online = True
         RNS.log("Spawned new TCPClient Interface: "+str(spawned_interface), RNS.LOG_VERBOSE)
         RNS.Transport.add_interface(spawned_interface)

@@ -2,12 +2,13 @@
   enable_transport = no
   share_instance = Yes
   instance_name = testrunner
-  shared_instance_port = 55905
-  instance_control_port = 55906
-  panic_on_interface_error = No
+#  shared_instance_port = 55905
+#  instance_control_port = 55906
+#  panic_on_interface_error = No
+#  discoverable = yes
 
   enable_zone = yes
-  zone_id = ffdcba090887
+  zone_id = ffdcab81
 
   magic_00 = 7f7f
   magic_01 = "8e8e"
@@ -16,23 +17,45 @@
   
 
 [logging]
-  loglevel = 1
+  loglevel = 7
 
 [interfaces]
   # No interfaces, only local traffic
-    [[Test IF]]
+    [[Default Interface]]
         type = AutoInterface
+        enabled = no
+    [[Client Interface]]
+        type = TCPClientInterface
         enabled = yes
-        zone_default_allow = Yes
+        mode = gateway
+        target_host = 127.0.0.1
+        target_port = 7822
+        zone_default_allow = yes
         [[[zone_rules]]]
-          [[[[ff00ff00ff00]]]]
+          [[[[ffdcab80]]]]
             accept_in = Yes
             accept_out = Yes
-            in_hop_cost = yes
-            out_hop_cost = yes
-          [[[[ff00ff00ff11]]]]
+            hop_cost = yes
+          [[[[ffdcab81]]]]
             accept_in = Yes
             accept_out = Yes
-            in_hop_cost = yes
-            out_hop_cost = yes
+            hop_cost = yes
+
+    [[Server Interface]]
+        type = TCPServerInterface
+        mode = boundary
+        enabled = yes
+        listen_ip = 0.0.0.0
+        listen_port = 7822
+        zone_default_allow = no
+        [[[zone_rules]]]
+          [[[[ffdcab80]]]]
+            accept_in = Yes
+            accept_out = Yes
+            hop_cost = yes
+          [[[[ffdcab82]]]]
+            accept_out = Yes
+
+
+
             

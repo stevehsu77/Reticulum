@@ -147,11 +147,15 @@ class Reticulum:
     # Length of truncated hashes in bits.
     TRUNCATED_HASHLENGTH = 128
 
-    # Length of zone IDs in bits is 48, which is 6 hexadecimal characters, or 3 bytes.
-    ZONE_IDLENGTH = (TRUNCATED_HASHLENGTH//16)*6
+    # Length of zone IDs in bits is 16, which is 4 hexadecimal characters, or 2 bytes.      ->steve
+    ZONE_IDLENGTH = (TRUNCATED_HASHLENGTH//8)*2
 
-    # Length of magic code in bits is 16, which is 2 hexadecimal characters, or 1 byte.
-    MAGIC_CODELENGTH = (TRUNCATED_HASHLENGTH//16)*2
+    # old method, mix zoneid and hash together
+    # Length of zone IDs in bits is 16, which is 4 hexadecimal characters, or 2 bytes.      ->steve
+    #ZONE_IDLENGTH = (TRUNCATED_HASHLENGTH//8)*3
+
+# Length of magic code in bits is 16, which is 4 hexadecimal characters, or 2 byte.         ->steve
+    MAGIC_CODELENGTH = (TRUNCATED_HASHLENGTH//8)
 
     HEADER_MINSIZE   = 2+1+(TRUNCATED_HASHLENGTH//8)*1
     HEADER_MAXSIZE   = 2+1+(TRUNCATED_HASHLENGTH//8)*2
@@ -993,6 +997,10 @@ class Reticulum:
                         interface.ifac_identity = RNS.Identity.from_bytes(interface.ifac_key)
                         interface.ifac_signature = interface.ifac_identity.sign(RNS.Identity.full_hash(interface.ifac_key))
 
+                    # initialise zone rules for this interface, if any are specified in the config          ->steve
+                    interface.zone_rules = Reticulum.get_zone_rules(name)
+                    if "zone_default_allow" in c: interface.zone_default_allow = c.as_bool("zone_default_allow")
+
                     RNS.Transport.add_interface(interface)
                     interface.final_init()
 
@@ -1003,8 +1011,6 @@ class Reticulum:
                 interface_config["selected_interface_mode"] = interface_mode
                 interface_config["configured_bitrate"] = configured_bitrate
 
-                interface_config["zone_rules"] = self.get_zone_rules(name)
-       
                 if c["type"] == "AutoInterface":
                     interface = AutoInterface.AutoInterface(RNS.Transport, interface_config)
                     interface_post_init(interface)
@@ -1897,6 +1903,7 @@ class Reticulum:
         """   
 
         zoneid = Reticulum.__zone_id
+        if zoneid == None or len(zoneid) != Reticulum.ZONE_IDLENGTH//8: return hash
         magicbith = zoneid[Reticulum.ZONE_IDLENGTH//8-1] & 0b10000000
         magicbitl = zoneid[0] & 0b00000001
         magichash = None
@@ -1909,13 +1916,19 @@ class Reticulum:
         else:
             magichash = bytearray(Reticulum.__magic11)
     
-        for i in range(Reticulum.TRUNCATED_HASHLENGTH//16):
-            if i<len(hash): magichash.append(hash[i])
-            else: magichash.append(0)
-            if i<len(zoneid): magichash.append(zoneid[i])
+        # old method, mix zoneid and hash together                                      ->steve
+        # for i in range(Reticulum.TRUNCATED_HASHLENGTH//16):
+        #     if i<len(hash): magichash.append(hash[i])
+        #     else: magichash.append(0)
+        #     if i<len(zoneid): magichash.append(zoneid[i])
 
-        magichash[1] = 0b11111110
-        backcode=Reticulum.decode_zone_hash(bytes(magichash))
+        # new method, just put the zozeid infront of the hash,                          ->steve
+        # and use the magic bits to check for validity and zoneid
+        for i in range(Reticulum.ZONE_IDLENGTH//8):
+            magichash.append(zoneid[i])
+        for i in range(Reticulum.TRUNCATED_HASHLENGTH//8-Reticulum.ZONE_IDLENGTH//8-Reticulum.MAGIC_CODELENGTH//8):
+            if i<len(hash): magichash.append(hash[i])
+
         return bytes(magichash)
 
     @staticmethod
@@ -1926,7 +1939,7 @@ class Reticulum:
         :param hash: The Zone hash to decode.
         :returns: The original hash as bytes, or None if not found.
         """
-        # Implementation for decoding Zone hash
+        # Implementation for decoding Zone hash                                         ->steve
         if hash!= None and len(hash) == (Reticulum.TRUNCATED_HASHLENGTH//8):
             magiccode = hash[:2]
             magichigh = None
@@ -1944,14 +1957,26 @@ class Reticulum:
                 magichigh = 0b10000000
                 magiclow = 0b00000001
 
-            chkhigh=hash[Reticulum.ZONE_IDLENGTH//8*2+1] & 0b10000000
-            chklow=hash[3] & 0b00000001
+            #old method, check the magic bits by interleaving the hash and zoneid       ->steve
+            # chkhigh=hash[Reticulum.ZONE_IDLENGTH//8*2+1] & 0b10000000
+            # chklow=hash[3] & 0b00000001
+            # if magichigh != None and magiclow != None:
+            #     if chkhigh == magichigh and chklow == magiclow:
+            #         zoneid = bytearray()
+            #         for i in range(Reticulum.ZONE_IDLENGTH//8):
+            #             zoneid.append(hash[i*2+3])
+            #         return bytes(zoneid)
 
+            # new method, the zoneid is after the magic code,                           ->steve
+            # and the following bytes are the hash,
+            # so we just need to check the magic code and return the zoneid
+            chkhigh=hash[Reticulum.MAGIC_CODELENGTH//8+1] & 0b10000000
+            chklow=hash[Reticulum.MAGIC_CODELENGTH//8] & 0b00000001
             if magichigh != None and magiclow != None:
                 if chkhigh == magichigh and chklow == magiclow:
                     zoneid = bytearray()
                     for i in range(Reticulum.ZONE_IDLENGTH//8):
-                        zoneid.append(hash[i*2+3])
+                        zoneid.append(hash[i+Reticulum.MAGIC_CODELENGTH//8])
                     return bytes(zoneid)
             return None 
         
